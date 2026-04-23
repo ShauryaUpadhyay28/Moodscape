@@ -1,0 +1,683 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>MoodScape — Feel Your World</title>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Spectral:wght@300;400&display=swap" rel="stylesheet"/>
+  <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --sky-top: #0d0d1a;
+      --sky-bot: #1a1a3e;
+      --ground: #0a0a14;
+      --accent: #c9a96e;
+      --text: #f0e6d3;
+      --dim: rgba(240,230,211,0.45);
+      --particle: #ffffff;
+    }
+
+    html, body {
+      height: 100%; width: 100%;
+      overflow: hidden;
+      font-family: 'Spectral', serif;
+      background: #0d0d1a;
+      color: var(--text);
+    }
+
+    /* ── WORLD CANVAS ── */
+    #world {
+      position: fixed; inset: 0;
+      display: flex; flex-direction: column;
+      transition: background 3s ease;
+      z-index: 0;
+    }
+    #sky {
+      flex: 1;
+      position: relative;
+      background: linear-gradient(180deg, var(--sky-top) 0%, var(--sky-bot) 100%);
+      transition: background 3s ease;
+      overflow: hidden;
+    }
+    #ground {
+      height: 28vh;
+      background: var(--ground);
+      position: relative;
+      overflow: hidden;
+      transition: background 3s ease;
+    }
+
+    /* terrain waves */
+    #terrain-svg {
+      position: absolute; top: -40px; left: 0; width: 100%; pointer-events: none;
+    }
+
+    /* stars */
+    .star {
+      position: absolute;
+      border-radius: 50%;
+      background: #fff;
+      animation: twinkle var(--dur,3s) infinite alternate;
+      opacity: 0;
+    }
+    @keyframes twinkle { from {opacity:0.1} to {opacity:var(--peak,0.9)} }
+
+    /* sun / moon */
+    #celestial {
+      position: absolute;
+      border-radius: 50%;
+      width: 90px; height: 90px;
+      top: 10%; right: 12%;
+      transition: all 3s ease;
+      filter: blur(0px);
+    }
+
+    /* clouds */
+    .cloud {
+      position: absolute;
+      background: rgba(255,255,255,0.12);
+      border-radius: 60px;
+      animation: drift linear infinite;
+    }
+    .cloud::before, .cloud::after {
+      content:''; position:absolute;
+      background: inherit; border-radius: 50%;
+    }
+    @keyframes drift { from{transform:translateX(-200px)} to{transform:translateX(110vw)} }
+
+    /* rain */
+    .raindrop {
+      position: absolute; top: -20px;
+      width: 1.5px;
+      background: linear-gradient(180deg, transparent, rgba(174,214,241,0.7));
+      animation: rain linear infinite;
+      border-radius: 2px;
+    }
+    @keyframes rain { to { transform: translateY(110vh) } }
+
+    /* snow */
+    .snowflake {
+      position: absolute; top: -10px;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.85);
+      animation: snowfall linear infinite;
+    }
+    @keyframes snowfall {
+      to { transform: translateY(110vh) translateX(var(--drift, 0px)); opacity: 0; }
+    }
+
+    /* lightning */
+    #lightning {
+      position: absolute; inset: 0;
+      background: white;
+      opacity: 0;
+      pointer-events: none;
+    }
+    .lightning-bolt {
+      position: absolute;
+      top: 0; left: var(--lx, 50%);
+      width: 2px;
+      height: var(--lh, 200px);
+      background: linear-gradient(180deg, #fff, rgba(255,220,0,0.6));
+      clip-path: polygon(40% 0%, 60% 0%, 80% 45%, 55% 45%, 100% 100%, 20% 55%, 45% 55%);
+      opacity: 0;
+      animation: bolt 0.15s ease-out;
+    }
+    @keyframes bolt { 0%{opacity:0.9} 100%{opacity:0} }
+
+    /* fireflies */
+    .firefly {
+      position: absolute;
+      width: 4px; height: 4px;
+      border-radius: 50%;
+      background: #aaff00;
+      box-shadow: 0 0 6px 3px rgba(170,255,0,0.6);
+      animation: fly var(--fd,4s) ease-in-out infinite alternate;
+      opacity: 0;
+    }
+    @keyframes fly {
+      0%  {transform:translate(0,0); opacity:0}
+      30% {opacity:0.9}
+      70% {opacity:0.6}
+      100%{transform:translate(var(--fx,40px), var(--fy,-60px)); opacity:0}
+    }
+
+    /* aurora */
+    #aurora {
+      position: absolute; inset: 0;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 3s;
+      background: linear-gradient(160deg,
+        rgba(0,255,180,0.12) 0%,
+        rgba(0,100,255,0.1) 40%,
+        rgba(180,0,255,0.08) 80%,
+        transparent 100%);
+      animation: aurora-wave 8s ease-in-out infinite alternate;
+    }
+    @keyframes aurora-wave {
+      from { transform: skewX(-5deg) scaleY(1); }
+      to   { transform: skewX(5deg) scaleY(1.1); }
+    }
+
+    /* ground elements */
+    .tree {
+      position: absolute;
+      bottom: 0;
+      display: flex; flex-direction: column; align-items: center;
+    }
+    .tree-trunk { background: #4a3728; }
+    .tree-top   { background: var(--tree-color, #2d5a27); border-radius: 50% 50% 40% 40%; }
+
+    /* ── UI PANEL ── */
+    #panel {
+      position: fixed; z-index: 10;
+      bottom: 0; left: 50%; transform: translateX(-50%);
+      width: min(680px, 96vw);
+      padding: 28px 32px 32px;
+      background: rgba(10,8,20,0.72);
+      backdrop-filter: blur(18px);
+      border-top: 1px solid rgba(201,169,110,0.25);
+      border-left: 1px solid rgba(201,169,110,0.12);
+      border-right: 1px solid rgba(201,169,110,0.12);
+      border-radius: 24px 24px 0 0;
+    }
+
+    #panel h1 {
+      font-family: 'Playfair Display', serif;
+      font-size: clamp(1.4rem, 3vw, 2rem);
+      font-weight: 400;
+      letter-spacing: 0.02em;
+      color: var(--accent);
+      margin-bottom: 4px;
+    }
+    #panel .subtitle {
+      font-size: 0.82rem;
+      color: var(--dim);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin-bottom: 20px;
+    }
+
+    #mood-input {
+      width: 100%;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(201,169,110,0.3);
+      border-radius: 12px;
+      padding: 14px 18px;
+      font-family: 'Spectral', serif;
+      font-size: 1.05rem;
+      color: var(--text);
+      resize: none;
+      outline: none;
+      transition: border-color 0.3s;
+      min-height: 80px;
+    }
+    #mood-input::placeholder { color: rgba(240,230,211,0.3); font-style: italic; }
+    #mood-input:focus { border-color: rgba(201,169,110,0.7); }
+
+    #controls {
+      display: flex; align-items: center; gap: 14px; margin-top: 14px;
+    }
+
+    #generate-btn {
+      flex: 1;
+      padding: 13px 24px;
+      background: linear-gradient(135deg, #c9a96e, #a8804a);
+      border: none; border-radius: 10px;
+      font-family: 'Playfair Display', serif;
+      font-size: 1rem; letter-spacing: 0.04em;
+      color: #1a1200; cursor: pointer;
+      transition: transform 0.15s, box-shadow 0.15s;
+    }
+    #generate-btn:hover { transform: translateY(-2px); box-shadow: 0 6px 24px rgba(201,169,110,0.35); }
+    #generate-btn:active { transform: translateY(0); }
+
+    #clear-btn {
+      padding: 13px 18px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 10px;
+      color: var(--dim); font-size: 0.85rem;
+      cursor: pointer; transition: background 0.2s;
+      font-family: 'Spectral', serif;
+    }
+    #clear-btn:hover { background: rgba(255,255,255,0.12); color: var(--text); }
+
+    #mood-label {
+      position: fixed; top: 24px; left: 50%; transform: translateX(-50%);
+      z-index: 10;
+      font-family: 'Playfair Display', serif;
+      font-size: clamp(1rem, 2.5vw, 1.4rem);
+      font-style: italic;
+      color: rgba(240,230,211,0.75);
+      text-shadow: 0 2px 12px rgba(0,0,0,0.6);
+      pointer-events: none;
+      transition: opacity 1s;
+      text-align: center;
+      max-width: 80vw;
+    }
+
+    /* mood chips */
+    #chips {
+      display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px;
+    }
+    .chip {
+      padding: 5px 13px;
+      border-radius: 20px;
+      font-size: 0.75rem;
+      letter-spacing: 0.06em;
+      border: 1px solid;
+      cursor: pointer;
+      transition: all 0.2s;
+      text-transform: uppercase;
+      font-family: 'Spectral', serif;
+    }
+    .chip:hover { transform: scale(1.06); }
+
+    /* time toggle */
+    #time-toggle {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 0.78rem; color: var(--dim); cursor: pointer;
+      user-select: none;
+    }
+    #time-toggle input { display: none; }
+    #time-slider {
+      width: 40px; height: 22px;
+      background: rgba(255,255,255,0.12);
+      border-radius: 11px; position: relative;
+      transition: background 0.3s;
+    }
+    #time-slider::after {
+      content:''; position: absolute;
+      width: 16px; height: 16px; border-radius: 50%;
+      background: var(--accent); top: 3px; left: 3px;
+      transition: transform 0.3s;
+    }
+    #time-toggle.day #time-slider { background: rgba(201,169,110,0.35); }
+    #time-toggle.day #time-slider::after { transform: translateX(18px); }
+
+    /* intensity bar */
+    #intensity-wrap { display: flex; align-items: center; gap: 10px; font-size:0.78rem; color:var(--dim); }
+    #intensity-wrap input[type=range] {
+      flex:1; accent-color: var(--accent);
+      -webkit-appearance: none; height:4px;
+      background: rgba(255,255,255,0.15); border-radius:2px; outline:none;
+    }
+    #intensity-wrap input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance:none; width:16px; height:16px;
+      border-radius:50%; background: var(--accent); cursor:pointer;
+    }
+
+    .row { display:flex; gap:16px; align-items:center; margin-top:12px; }
+  </style>
+</head>
+<body>
+
+<!-- WORLD -->
+<div id="world">
+  <div id="sky">
+    <div id="aurora"></div>
+    <div id="celestial"></div>
+    <div id="lightning"></div>
+  </div>
+  <div id="ground">
+    <svg id="terrain-svg" viewBox="0 0 1440 80" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
+      <path id="terrain-path" d="M0,40 Q360,10 720,40 Q1080,70 1440,40 L1440,80 L0,80 Z" fill="#0a0a14"/>
+    </svg>
+  </div>
+</div>
+
+<div id="mood-label">Awaiting your world…</div>
+
+<!-- PANEL -->
+<div id="panel">
+  <h1>MoodScape</h1>
+  <div class="subtitle">Your emotion, rendered as a living world</div>
+
+  <textarea id="mood-input" placeholder="Describe how you feel… e.g. "I feel restless and electric, like a storm is brewing inside me""></textarea>
+
+  <div id="chips">
+    <span class="chip" style="color:#6eb5ff;border-color:#6eb5ff33" data-mood="I feel calm and peaceful, like floating on still water">Serene</span>
+    <span class="chip" style="color:#ffaa33;border-color:#ffaa3333" data-mood="I feel joyful and warm, the sun is shining and everything is golden">Joyful</span>
+    <span class="chip" style="color:#aa77ff;border-color:#aa77ff33" data-mood="I feel melancholic and lonely, lost in a dark rainy night">Melancholic</span>
+    <span class="chip" style="color:#ff5555;border-color:#ff555533" data-mood="I feel angry and furious, like thunder and lightning raging inside">Furious</span>
+    <span class="chip" style="color:#aaffaa;border-color:#aaffaa33" data-mood="I feel hopeful and alive, like spring after a long winter">Hopeful</span>
+    <span class="chip" style="color:#55ffee;border-color:#55ffee33" data-mood="I feel awed and mystical, like standing under the northern lights">Mystical</span>
+    <span class="chip" style="color:#ffccaa;border-color:#ffccaa33" data-mood="I feel nostalgic and warm, like a campfire on a quiet autumn evening">Nostalgic</span>
+    <span class="chip" style="color:#bbbbbb;border-color:#bbbbbb33" data-mood="I feel numb and empty, nothing feels real, a grey hollow silence">Numb</span>
+  </div>
+
+  <div class="row">
+    <div id="intensity-wrap">
+      <span>Intensity</span>
+      <input type="range" id="intensity" min="1" max="10" value="5"/>
+      <span id="intensity-val">5</span>
+    </div>
+    <label id="time-toggle">
+      <input type="checkbox" id="day-mode"/>
+      <div id="time-slider"></div>
+      <span id="time-label">Night</span>
+    </label>
+  </div>
+
+  <div id="controls">
+    <button id="generate-btn">✦ Generate World</button>
+    <button id="clear-btn">Reset</button>
+  </div>
+</div>
+
+<script>
+$(function(){
+
+  // ── MOOD DATABASE ──
+  const moods = {
+    calm:      { words:['calm','peace','serene','still','quiet','tranquil','gentle','soft','rest','float','slow'],
+                 sky:['#0a1628','#1a3050'], ground:'#0a1420', celestial:{color:'#d4e8ff',glow:'rgba(180,220,255,0.3)',size:70},
+                 clouds:3, rain:0, snow:0, storm:0, firefly:8, aurora:0, treesColor:'#1a3d2e', terrainColor:'#0a1420',
+                 label:'"A stillness wraps the world…"' },
+    joy:       { words:['joy','happy','warm','sun','bright','excited','smile','cheer','love','golden','alive','energy','radiant'],
+                 sky:['#ff8c42','#ffcc66'], ground:'#2d4a1e', celestial:{color:'#fff176',glow:'rgba(255,230,50,0.5)',size:100},
+                 clouds:5, rain:0, snow:0, storm:0, firefly:0, aurora:0, treesColor:'#3d7a28', terrainColor:'#2d4a1e',
+                 label:'"Light spills across the hills…"' },
+    sad:       { words:['sad','lonely','cry','tear','blue','hollow','empty','miss','loss','grey','gray','depress','melanchol'],
+                 sky:['#1a1e2e','#2a2e42'], ground:'#0e0e18', celestial:{color:'#7090a0',glow:'rgba(100,140,160,0.2)',size:55},
+                 clouds:8, rain:24, snow:0, storm:0, firefly:0, aurora:0, treesColor:'#1e2e28', terrainColor:'#0e0e18',
+                 label:'"Rain traces old wounds…"' },
+    anger:     { words:['ang','furious','rage','storm','furi','fierce','burn','fire','thunder','lightning','electric','wild','chaotic','restless'],
+                 sky:['#1a0800','#3d1000'], ground:'#150500', celestial:{color:'#ff4400',glow:'rgba(255,80,0,0.5)',size:80},
+                 clouds:6, rain:0, snow:0, storm:8, firefly:0, aurora:0, treesColor:'#2a1000', terrainColor:'#150500',
+                 label:'"The sky tears itself apart…"' },
+    hope:      { words:['hope','spring','new','fresh','grow','bloom','light','dawn','rise','renew','life','better','forward','await'],
+                 sky:['#003366','#0066aa'], ground:'#1a3a1a', celestial:{color:'#ffe0a0',glow:'rgba(255,210,120,0.4)',size:85},
+                 clouds:4, rain:0, snow:0, storm:0, firefly:5, aurora:0, treesColor:'#2a6030', terrainColor:'#1a3a1a',
+                 label:'"A new dawn stretches wide…"' },
+    mystical:  { words:['mystic','awed','awe','wonder','magic','northern','lights','aurora','cosmos','universe','dream','surreal','ethereal','spirit'],
+                 sky:['#010814','#030d20'], ground:'#020810', celestial:{color:'#ccaaff',glow:'rgba(180,130,255,0.4)',size:65},
+                 clouds:1, rain:0, snow:2, storm:0, firefly:12, aurora:1, treesColor:'#0d1a2a', terrainColor:'#020810',
+                 label:'"The veil between worlds grows thin…"' },
+    nostalgic: { words:['nostalg','autumn','fall','campfire','amber','warm','remember','memory','old','past','faded','golden','cozy','harvest'],
+                 sky:['#1a0e05','#3a1e08'], ground:'#1a0e05', celestial:{color:'#ff9944',glow:'rgba(255,140,40,0.4)',size:90},
+                 clouds:3, rain:0, snow:0, storm:0, firefly:6, aurora:0, treesColor:'#6b3a10', terrainColor:'#1a0e05',
+                 label:'"Smoke and memory drift together…"' },
+    numb:      { words:['numb','void','nothing','empty','flat','hollow','grey','gray','blank','silent','still','dead','absent'],
+                 sky:['#111111','#1c1c1c'], ground:'#0c0c0c', celestial:{color:'#444444',glow:'rgba(60,60,60,0.2)',size:50},
+                 clouds:4, rain:0, snow:0, storm:0, firefly:0, aurora:0, treesColor:'#1a1a1a', terrainColor:'#0c0c0c',
+                 label:'"The world holds its breath…"' },
+    default:   { sky:['#0d0d1a','#1a1a3e'], ground:'#0a0a14', celestial:{color:'#c8d8f0',glow:'rgba(180,200,240,0.25)',size:70},
+                 clouds:2, rain:0, snow:0, storm:0, firefly:3, aurora:0, treesColor:'#1e3028', terrainColor:'#0a0a14',
+                 label:'"Awaiting your world…"' }
+  };
+
+  let currentScene = null;
+  let stormInterval = null;
+  let isDay = false;
+
+  function detectMood(text){
+    text = text.toLowerCase();
+    let best = null, bestScore = 0;
+    for(let key in moods){
+      if(key === 'default') continue;
+      const m = moods[key];
+      if(!m.words) continue;
+      let score = 0;
+      m.words.forEach(w => { if(text.includes(w)) score++; });
+      if(score > bestScore){ bestScore=score; best=key; }
+    }
+    return bestScore > 0 ? best : 'default';
+  }
+
+  function lerp(a,b,t){ return a+(b-a)*t; }
+
+  function hexToRgb(hex){
+    const r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(3,5),16),b=parseInt(hex.slice(5,7),16);
+    return {r,g,b};
+  }
+
+  function clearParticles(){
+    $('.star,.cloud,.raindrop,.snowflake,.firefly,.lightning-bolt').remove();
+    clearInterval(stormInterval);
+    stormInterval = null;
+  }
+
+  function buildStars(count){
+    for(let i=0;i<count;i++){
+      const size = Math.random()*2.5+0.5;
+      const dur  = (Math.random()*4+2).toFixed(1)+'s';
+      const peak = (Math.random()*0.7+0.2).toFixed(2);
+      $('<div class="star">').css({
+        left: Math.random()*100+'%',
+        top:  Math.random()*80+'%',
+        width: size+'px', height: size+'px',
+        '--dur': dur, '--peak': peak,
+        animationDelay: (Math.random()*4)+'s'
+      }).appendTo('#sky');
+    }
+  }
+
+  function buildClouds(count, opacity){
+    for(let i=0;i<count;i++){
+      const w = Math.random()*180+80;
+      const h = w*0.38;
+      const dur = (Math.random()*60+40)+'s';
+      const top = Math.random()*50+5;
+      const el = $('<div class="cloud">').css({
+        width:w+'px', height:h+'px',
+        top:top+'%', opacity: opacity||0.12,
+        animationDuration: dur,
+        animationDelay: -(Math.random()*60)+'s'
+      });
+      el.css('--before-w', (w*0.55)+'px');
+      $('<span>').css({ position:'absolute', background:'inherit', borderRadius:'50%',
+        width:w*0.55+'px', height:h*1.4+'px', top:-h*0.4+'px', left:w*0.15+'px' }).appendTo(el);
+      $('<span>').css({ position:'absolute', background:'inherit', borderRadius:'50%',
+        width:w*0.38+'px', height:h*1.2+'px', top:-h*0.2+'px', right:w*0.15+'px' }).appendTo(el);
+      el.appendTo('#sky');
+    }
+  }
+
+  function buildRain(count){
+    for(let i=0;i<count;i++){
+      const h = Math.random()*80+40;
+      $('<div class="raindrop">').css({
+        left: Math.random()*110-5+'%',
+        height: h+'px',
+        animationDuration: (Math.random()*0.4+0.5)+'s',
+        animationDelay: -(Math.random()*2)+'s',
+        opacity: Math.random()*0.5+0.3
+      }).appendTo('#sky');
+    }
+  }
+
+  function buildSnow(count){
+    for(let i=0;i<count;i++){
+      const sz = Math.random()*4+2;
+      $('<div class="snowflake">').css({
+        left: Math.random()*100+'%',
+        width:sz+'px', height:sz+'px',
+        '--drift': (Math.random()*80-40)+'px',
+        animationDuration: (Math.random()*6+5)+'s',
+        animationDelay: -(Math.random()*8)+'s',
+        opacity: Math.random()*0.7+0.3
+      }).appendTo('#sky');
+    }
+  }
+
+  function buildFireflies(count){
+    for(let i=0;i<count;i++){
+      $('<div class="firefly">').css({
+        left: Math.random()*90+5+'%',
+        top: Math.random()*60+30+'%',
+        '--fd': (Math.random()*4+3)+'s',
+        '--fx': (Math.random()*120-60)+'px',
+        '--fy': (Math.random()*100-80)+'px',
+        animationDelay: (Math.random()*5)+'s'
+      }).appendTo('#sky');
+    }
+  }
+
+  function doLightning(){
+    const bolt = $('<div class="lightning-bolt">').css({
+      '--lx': Math.random()*80+10+'%',
+      '--lh': (Math.random()*200+150)+'px'
+    }).appendTo('#sky');
+    setTimeout(()=>bolt.remove(), 300);
+    $('#sky').css('background','rgba(255,255,255,0.06)');
+    setTimeout(()=>$('#sky').css('background',''), 120);
+  }
+
+  function buildTrees(color, count){
+    $('#ground .tree').remove();
+    for(let i=0;i<count;i++){
+      const h = Math.random()*60+40;
+      const w = h*0.55;
+      const left = Math.random()*92+2;
+      const tree = $('<div class="tree">').css({ left:left+'%', bottom:0 });
+      $('<div class="tree-top">').css({
+        width:w+'px', height:h+'px', background:color,
+        '--tree-color': color
+      }).appendTo(tree);
+      $('<div class="tree-trunk">').css({ width:w*0.22+'px', height:h*0.35+'px' }).appendTo(tree);
+      tree.appendTo('#ground');
+    }
+  }
+
+  function buildTerrain(color){
+    const y1 = 20+Math.random()*30, y2 = 10+Math.random()*40, y3 = 20+Math.random()*30;
+    $('#terrain-path').attr('d',
+      `M0,${y1} Q360,${y2} 720,${y3} Q1080,${80-y2} 1440,${y1} L1440,80 L0,80 Z`
+    ).attr('fill', color);
+  }
+
+  function applyDayNight(scene){
+    if(isDay){
+      const rgb = hexToRgb(scene.sky[1]);
+      $('#sky').css('background', `linear-gradient(180deg, hsl(210,60%,55%) 0%, hsl(40,80%,75%) 100%)`);
+      $('#celestial').css({ background: '#fff8d0', boxShadow:`0 0 60px 20px rgba(255,240,100,0.6)`, width:'100px', height:'100px', top:'8%', right:'10%' });
+    } else {
+      $('#sky').css('background', `linear-gradient(180deg, ${scene.sky[0]} 0%, ${scene.sky[1]} 100%)`);
+      const c = scene.celestial;
+      $('#celestial').css({
+        background: c.color,
+        boxShadow: `0 0 40px 16px ${c.glow}`,
+        width: c.size+'px', height: c.size+'px',
+        top:'10%', right:'12%'
+      });
+    }
+  }
+
+  function generateWorld(){
+    const text     = $('#mood-input').val().trim();
+    const intensity= parseInt($('#intensity').val());
+    const scale    = intensity / 5;
+
+    if(!text){ shakeInput(); return; }
+
+    const moodKey  = detectMood(text);
+    const scene    = moods[moodKey];
+    currentScene   = scene;
+
+    clearParticles();
+
+    // Sky
+    applyDayNight(scene);
+
+    // Ground
+    $('#ground').css('background', scene.ground);
+    buildTerrain(scene.terrainColor || scene.ground);
+    buildTrees(scene.treesColor, Math.round((5+Math.random()*5)*scale));
+
+    // Stars (night only)
+    if(!isDay) buildStars(Math.round(60*(scale)));
+
+    // Clouds
+    buildClouds(Math.round(scene.clouds*scale), moodKey==='sad'?0.25:0.14);
+
+    // Rain
+    if(scene.rain) buildRain(Math.round(scene.rain*scale));
+
+    // Snow
+    if(scene.snow) buildSnow(Math.round(scene.snow*scale));
+
+    // Storm
+    if(scene.storm){
+      const interval = Math.max(800, 3000 - scene.storm*intensity*30);
+      stormInterval = setInterval(doLightning, interval);
+    }
+
+    // Fireflies
+    if(scene.firefly && !isDay) buildFireflies(Math.round(scene.firefly*scale));
+
+    // Aurora
+    $('#aurora').css('opacity', scene.aurora ? 0.8*scale : 0);
+
+    // Label
+    $('#mood-label').fadeOut(400, function(){
+      $(this).text(scene.label).fadeIn(600);
+    });
+
+    // Flash effect
+    $('body').css('transition','none').css('filter','brightness(1.4)');
+    setTimeout(()=>$('body').css({transition:'filter 1s', filter:'brightness(1)'}), 80);
+  }
+
+  function shakeInput(){
+    $('#mood-input').css('border-color','#ff4444');
+    $('#panel').addClass('shake');
+    setTimeout(()=>{
+      $('#mood-input').css('border-color','');
+      $('#panel').removeClass('shake');
+    },600);
+  }
+
+  function resetWorld(){
+    clearParticles();
+    const def = moods.default;
+    $('#sky').css('background', `linear-gradient(180deg, ${def.sky[0]} 0%, ${def.sky[1]} 100%)`);
+    $('#ground').css('background', def.ground);
+    $('#celestial').css({ background:def.celestial.color, boxShadow:`0 0 40px 16px ${def.celestial.glow}`, width:def.celestial.size+'px', height:def.celestial.size+'px' });
+    $('#aurora').css('opacity',0);
+    buildTerrain(def.terrainColor);
+    buildTrees(def.treesColor, 6);
+    buildStars(40);
+    $('#mood-label').text(def.label);
+    $('#mood-input').val('');
+  }
+
+  // ── EVENTS ──
+  $('#generate-btn').on('click', generateWorld);
+  $('#mood-input').on('keydown', function(e){
+    if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); generateWorld(); }
+  });
+  $('#clear-btn').on('click', resetWorld);
+
+  // Chips
+  $(document).on('click','.chip', function(){
+    $('#mood-input').val($(this).data('mood'));
+    generateWorld();
+  });
+
+  // Intensity display
+  $('#intensity').on('input', function(){
+    $('#intensity-val').text($(this).val());
+  });
+
+  // Day/Night toggle
+  $('#day-mode').on('change', function(){
+    isDay = $(this).is(':checked');
+    $('#time-toggle').toggleClass('day', isDay);
+    $('#time-label').text(isDay ? 'Day' : 'Night');
+    if(currentScene) applyDayNight(currentScene);
+    $('.star').toggle(!isDay);
+    if(!isDay && currentScene && currentScene.firefly) buildFireflies(currentScene.firefly);
+    else $('.firefly').remove();
+  });
+
+  // Init
+  resetWorld();
+});
+</script>
+</body>
+</html>
